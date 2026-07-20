@@ -18,6 +18,7 @@ const envConfig = readEnvFile([
   'NANOCLAW_EGRESS_LOCKDOWN',
   'NANOCLAW_EGRESS_NETWORK',
   'ONECLI_GATEWAY_CONTAINER',
+  'GATEWAY_SIGNING_SECRET',
 ]);
 
 /**
@@ -73,6 +74,11 @@ export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
 export const CONTAINER_INSTALL_LABEL = `nanoclaw-install=${INSTALL_SLUG}`;
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
+// Signs the per-agent gateway token injected into each spawned container (see
+// gateway-token.ts). Shared only with the ai-platform n8n gateway's auth
+// sub-workflow — never with agent containers, which receive only their own
+// already-signed token and cannot mint or forge one for another agent.
+export const GATEWAY_SIGNING_SECRET = process.env.GATEWAY_SIGNING_SECRET || envConfig.GATEWAY_SIGNING_SECRET || '';
 // Per-container resource caps, passed through to `docker run`. Default empty =
 // no flag added = today's unbounded behavior (don't OOM existing OSS workloads).
 // Operators opt in: CONTAINER_CPU_LIMIT=2, CONTAINER_MEMORY_LIMIT=8g.

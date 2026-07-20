@@ -28,6 +28,7 @@ import { updateContainerConfigScalars } from './db/container-configs.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
+import { mintGatewayToken } from './gateway-token.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
@@ -452,6 +453,16 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // ai-platform gateway auth: a per-agent signed token proving identity to the
+  // n8n gateway's `auth` sub-workflow (registry-grant lookup proves authority
+  // separately). One token per spawn, scoped to this agent group + container;
+  // a container cannot mint a token for a different agent group.
+  const gatewayToken = mintGatewayToken(agentGroup.id, agentGroup.folder, containerName);
+  if (gatewayToken) {
+    args.push('-e', `AGENT_GATEWAY_TOKEN=${gatewayToken}`);
+    args.push('-e', `AGENT_GROUP_FOLDER=${agentGroup.folder}`);
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
