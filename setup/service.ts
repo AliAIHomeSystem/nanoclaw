@@ -332,6 +332,11 @@ RestartSec=5
 KillMode=process
 Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+# WSL2/IPv6-broken hosts: AAAA records resolve but have no route, and Node's
+# Happy Eyeballs (autoSelectFamily) mishandles the fallback, so outbound fetch
+# to IPv6-first hosts (api.telegram.org, etc.) fails with NetworkError/ETIMEDOUT.
+# Force IPv4-first and disable family autoselection. Harmless on dual-stack hosts.
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first --no-network-family-autoselection
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
