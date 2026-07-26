@@ -20,6 +20,8 @@
 import { getChannelAdapter, getChannelDefaults } from './channels/channel-registry.js';
 import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/channel-defaults.js';
 import { gateCommand } from './command-gate.js';
+import { resolveIntegrity, isControllerReason, stampIntegrity } from './integrity.js';
+import { canAccessAgentGroup } from './modules/permissions/access.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
@@ -504,6 +506,11 @@ async function deliverToAgent(
     }
   }
 
+  // Gateway-set integrity label (src/integrity.ts). The host knows the sender's
+  // role; the untrusted container renders provenance, it never decides it.
+  const accessDecision = userId ? canAccessAgentGroup(userId, agent.agent_group_id) : null;
+  const integrity = resolveIntegrity(event.message.kind, isControllerReason(accessDecision?.reason));
+
   writeSessionMessage(session.agent_group_id, session.id, {
     id: messageIdForAgent(event.message.id, agent.agent_group_id),
     kind: event.message.kind,
@@ -511,7 +518,7 @@ async function deliverToAgent(
     platformId: deliveryAddr.platformId,
     channelType: deliveryAddr.channelType,
     threadId: deliveryAddr.threadId,
-    content: event.message.content,
+    content: stampIntegrity(event.message.content, integrity),
     trigger: wake ? 1 : 0,
   });
 

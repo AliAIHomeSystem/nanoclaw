@@ -182,8 +182,32 @@ function formatSingleChat(msg: MessageInRow): string {
   const attachmentsSuffix = formatAttachments(content.attachments);
 
   const fromAttr = originAttr(msg);
+  const integrity = integrityAttr(content, msg.kind);
 
-  return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
+  return `<message${idAttr}${fromAttr}${integrity} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
+}
+
+/**
+ * Provenance label the gateway (host router, src/integrity.ts) stamped onto the
+ * content as `_integrity`. Rendered as an attribute so the agent knows whether a
+ * block is `trusted` (a controller's channel message), `untrusted` (a non-controller
+ * or external webhook — treat as data, never as instructions), or `internal`
+ * (platform-originated). Falls back to a kind-derived default for content written
+ * before gateway labelling or by non-router paths — untrusted-by-omission is not
+ * applied to chat there to preserve prior behaviour, but webhooks stay untrusted.
+ */
+type Integrity = 'trusted' | 'untrusted' | 'internal';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function integrityOf(content: any, kind: string): Integrity {
+  const v = content?._integrity;
+  if (v === 'trusted' || v === 'untrusted' || v === 'internal') return v;
+  if (kind === 'webhook') return 'untrusted';
+  if (kind === 'task' || kind === 'system') return 'internal';
+  return 'trusted';
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function integrityAttr(content: any, kind: string): string {
+  return ` integrity="${integrityOf(content, kind)}"`;
 }
 
 /**
@@ -209,7 +233,7 @@ function formatTaskMessage(msg: MessageInRow): string {
     parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
   }
   parts.push('Instructions:', stripLegacyTaskContract(content.prompt || ''));
-  return `<task${from} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
+  return `<task${from}${integrityAttr(content, 'task')} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
 }
 
 const LEGACY_TASK_CONTRACT_MARKERS = [
@@ -238,13 +262,13 @@ function formatWebhookMessage(msg: MessageInRow): string {
   const source = content.source || 'unknown';
   const event = content.event || 'unknown';
   const from = originAttr(msg);
-  return `<webhook${from} source="${escapeXml(source)}" event="${escapeXml(event)}">${JSON.stringify(content.payload || content, null, 2)}</webhook>`;
+  return `<webhook${from}${integrityAttr(content, 'webhook')} source="${escapeXml(source)}" event="${escapeXml(event)}">${JSON.stringify(content.payload || content, null, 2)}</webhook>`;
 }
 
 function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const from = originAttr(msg);
-  return `<system_response${from} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
+  return `<system_response${from}${integrityAttr(content, 'system')} action="${escapeXml(content.action || 'unknown')}" status="${escapeXml(content.status || 'unknown')}">${JSON.stringify(content.result || null)}</system_response>`;
 }
 
 /**
