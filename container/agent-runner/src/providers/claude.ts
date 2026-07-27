@@ -7,6 +7,7 @@ import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
 import { TIMEZONE, formatLocalStamp } from '../timezone.js';
+import { isUntrustedToolOutput, untrustedToolMarker } from '../tool-integrity.js';
 import { registerProvider } from './provider-registry.js';
 import type {
   AgentProvider,
@@ -248,12 +249,28 @@ const preToolUseHook: HookCallback = async (input) => {
   return { continue: true };
 };
 
-/** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
-const postToolUseHook: HookCallback = async () => {
+/**
+ * Clear in-flight tool on PostToolUse / PostToolUseFailure, and — on a SUCCESSFUL
+ * PostToolUse for an external-content tool — append an integrity marker so the
+ * model treats fetched content as data, not instructions (tool half of the
+ * integrity standard; see src/tool-integrity.ts). The marker is code-set, never
+ * model-set. Skipped on failures (an error has no untrusted content to mark).
+ */
+const postToolUseHook: HookCallback = async (input) => {
   try {
     clearContainerToolInFlight();
   } catch (err) {
     log(`PostToolUse: failed to clear container_state: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const i = input as { tool_name?: string; hook_event_name?: string };
+  if (i.hook_event_name === 'PostToolUse' && isUntrustedToolOutput(i.tool_name ?? '')) {
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: untrustedToolMarker(i.tool_name ?? ''),
+      },
+    } as unknown as ReturnType<HookCallback>;
   }
   return { continue: true };
 };
