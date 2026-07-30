@@ -26,7 +26,8 @@ describe('resolveIntegrity', () => {
 describe('isControllerReason', () => {
   it('is true only for owner/admin reasons', () => {
     for (const r of ['owner', 'global_admin', 'admin_of_group']) expect(isControllerReason(r)).toBe(true);
-    for (const r of ['member', 'not_member', 'unknown_user', null, undefined]) expect(isControllerReason(r)).toBe(false);
+    for (const r of ['member', 'not_member', 'unknown_user', null, undefined])
+      expect(isControllerReason(r)).toBe(false);
   });
 });
 

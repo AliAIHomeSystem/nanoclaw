@@ -2,11 +2,13 @@
  * Agent-to-agent guard adapter — the module's catalog entries, composed at
  * the module edge (imported by ./index.ts).
  *
- * agents.create — the cli_scope branch moved verbatim out of
- * create-agent.ts: `global` scope creates directly (create_agent is the
- * intended primitive for trusted owner agent groups); anything else — the
- * default `group` scope, and unknown/missing config, fail-closed — holds for
- * the requesting group's admin chain.
+ * agents.create — by cli_scope: `global` scope (trusted owner agent groups)
+ * creates directly; everything else — the default `group` scope, and
+ * unknown/missing config, fail-closed — is DENIED. Confined agents must not
+ * self-create; new agents are commissioned through Forge → Gate 2 (the
+ * dedicated gate bot / executor path), keeping creation authority off the
+ * chat/LLM path. (Site policy: previously group scope HELD for owner approval;
+ * tightened to DENY so the gate-bot commissioning path is the only route.)
  *
  * a2a.send — the decision moved verbatim out of routeAgentMessage, in its
  * original check order: a missing destination row denies; a missing target
@@ -49,10 +51,14 @@ export const agentsCreate = defineGuardedAction({
       // would be needless friction.
       return ALLOW('trusted global-scope agent group');
     }
-    // The realistic prompt-injection victim (default `group` scope) — and any
-    // unknown config value, fail-closed — requires an admin before any
-    // central-DB write.
-    return HOLD('agent-initiated create_agent requires admin approval');
+    // Confined (default `group` scope) — and any unknown config value,
+    // fail-closed — may NOT self-create. New agents are commissioned through
+    // Forge → Gate 2 (approval on the dedicated gate bot, creation via the
+    // executor), never the native tool on the chat/LLM path.
+    return DENY(
+      'agent-initiated create_agent is disabled for confined (group-scope) agents — ' +
+        'request the new agent through Forge (the Architect), which builds it via Gate 2.',
+    );
   },
 });
 

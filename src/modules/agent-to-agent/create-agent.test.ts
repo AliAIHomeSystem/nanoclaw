@@ -4,8 +4,9 @@
  * Regression guard for the audit finding: `create_agent` is a privileged
  * central-DB write with no host-side authz. Authorization is the guard's
  * `agents.create` decision — trusted owner agent groups ('global') create
- * directly; confined groups ('group', the default and the prompt-injection
- * victim) hold for admin approval. These tests drive the REAL wrapped
+ * directly; confined groups ('group', the default) are DENIED (site policy:
+ * new agents are commissioned via Forge → Gate 2, never the native tool on the
+ * chat/LLM path). These tests drive the REAL wrapped
  * delivery action (the only reachable path) and the approve continuation's
  * grant-carrying re-entry.
  */
@@ -171,32 +172,33 @@ describe('create_agent — guard-based authorization (wrapped delivery action)',
     );
   });
 
-  it('group scope (default): requires approval, does NOT create directly', async () => {
+  it('group scope (default): DENIED — no approval card, no create (must go via Forge/Gate 2)', async () => {
     mockGetContainerConfig.mockReturnValue({ cli_scope: 'group' });
 
     await runCreateAgent({ name: 'Scout', instructions: 'help' });
 
-    expect(mockRequestApproval).toHaveBeenCalledTimes(1);
-    expect(mockRequestApproval.mock.calls[0][0]).toMatchObject({ action: 'create_agent' });
+    // Site policy: confined agents may not self-create; the native tool is a
+    // hard deny, so no owner approval is ever raised on the chat/LLM path.
+    expect(mockRequestApproval).not.toHaveBeenCalled();
     expect(mockCreateAgentGroup).not.toHaveBeenCalled();
     expect(mockInitGroupFilesystem).not.toHaveBeenCalled();
   });
 
-  it('missing config: fails closed to approval (no direct create)', async () => {
+  it('missing config: fails closed to DENY (no approval, no create)', async () => {
     mockGetContainerConfig.mockReturnValue(undefined);
 
     await runCreateAgent({ name: 'Scout' });
 
-    expect(mockRequestApproval).toHaveBeenCalledTimes(1);
+    expect(mockRequestApproval).not.toHaveBeenCalled();
     expect(mockCreateAgentGroup).not.toHaveBeenCalled();
   });
 
-  it('disabled/other scope: requires approval', async () => {
+  it('disabled/other scope: DENIED (no approval, no create)', async () => {
     mockGetContainerConfig.mockReturnValue({ cli_scope: 'disabled' });
 
     await runCreateAgent({ name: 'Scout' });
 
-    expect(mockRequestApproval).toHaveBeenCalledTimes(1);
+    expect(mockRequestApproval).not.toHaveBeenCalled();
     expect(mockCreateAgentGroup).not.toHaveBeenCalled();
   });
 
@@ -211,7 +213,10 @@ describe('create_agent — guard-based authorization (wrapped delivery action)',
 });
 
 describe('create_agent — approved replay (grant-carrying re-entry)', () => {
-  it('valid grant executes exactly once — decide hold is satisfied, create runs', async () => {
+  it('valid grant for a group-scope agent still DENIES — the site policy is not overridable by replay', async () => {
+    // Since group scope is now a hard deny, create_agent never HOLDs, so no
+    // grant is ever minted for one in practice. Even if a grant is presented,
+    // the re-run decide denies: confined agents cannot self-create by any path.
     mockGetContainerConfig.mockReturnValue({ cli_scope: 'group' });
     const payload = { name: 'Scout', instructions: 'help' };
     const approval = liveGrant('appr-ca-1', payload);
@@ -220,8 +225,8 @@ describe('create_agent — approved replay (grant-carrying re-entry)', () => {
     expect(continuation).toBeDefined();
     await continuation!({ session: SESSION, payload, approval, userId: 'telegram:admin', notify: vi.fn() });
 
-    expect(mockCreateAgentGroup).toHaveBeenCalledTimes(1);
-    expect(mockRequestApproval).not.toHaveBeenCalled(); // no second card
+    expect(mockCreateAgentGroup).not.toHaveBeenCalled();
+    expect(mockRequestApproval).not.toHaveBeenCalled();
   });
 
   it('dead grant (row already resolved) refuses the replay', async () => {

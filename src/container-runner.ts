@@ -462,6 +462,10 @@ async function buildContainerArgs(
   if (gatewayToken) {
     args.push('-e', `AGENT_GATEWAY_TOKEN=${gatewayToken}`);
     args.push('-e', `AGENT_GROUP_FOLDER=${agentGroup.folder}`);
+    // Transport half of gateway auth: where to POST gate calls. n8n is attached
+    // to the same locked-down egress network as the agent, reachable by its
+    // container name. Overridable via .env for a differently-named gateway.
+    args.push('-e', `AI_GATEWAY_URL=${process.env.AI_GATEWAY_URL || 'http://n8n:5678'}`);
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
