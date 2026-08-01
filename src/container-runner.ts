@@ -34,6 +34,7 @@ import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
+import { mergeNoProxy } from './no-proxy.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
@@ -460,13 +461,20 @@ async function buildContainerArgs(
   // separately). One token per spawn, scoped to this agent group + container;
   // a container cannot mint a token for a different agent group.
   const gatewayToken = mintGatewayToken(agentGroup.id, agentGroup.folder, containerName);
+  let gatewayHost: string | undefined;
   if (gatewayToken) {
     args.push('-e', `AGENT_GATEWAY_TOKEN=${gatewayToken}`);
     args.push('-e', `AGENT_GROUP_FOLDER=${agentGroup.folder}`);
     // Transport half of gateway auth: where to POST gate calls. n8n is attached
     // to the same locked-down egress network as the agent, reachable by its
     // container name. Overridable via .env for a differently-named gateway.
-    args.push('-e', `AI_GATEWAY_URL=${process.env.AI_GATEWAY_URL || 'http://n8n:5678'}`);
+    const gatewayUrl = process.env.AI_GATEWAY_URL || 'http://n8n:5678';
+    args.push('-e', `AI_GATEWAY_URL=${gatewayUrl}`);
+    try {
+      gatewayHost = new URL(gatewayUrl).hostname;
+    } catch {
+      /* not a parseable URL — leave the proxy bypass off rather than guess */
+    }
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
@@ -474,6 +482,21 @@ async function buildContainerArgs(
     for (const [key, value] of Object.entries(providerContribution.env)) {
       args.push('-e', `${key}=${value}`);
     }
+  }
+
+  // Gate calls must bypass the OneCLI credential proxy. The gateway is on the
+  // same internal network and authenticates with the agent's own signed token,
+  // so there is no credential to inject — and routing through the proxy is
+  // actively harmful: it treats ANY upstream 401/403 as a missing credential
+  // and replaces the response body with its own "add an API key" instructions.
+  // That would turn a gate's "you lack this grant" refusal into a credential
+  // hunt the agent cannot possibly complete. Pushed AFTER the provider block so
+  // it merges with (rather than loses to) a provider-set NO_PROXY.
+  if (gatewayHost) {
+    const providerNoProxy = providerContribution.env?.NO_PROXY ?? process.env.NO_PROXY;
+    const merged = mergeNoProxy(providerNoProxy, gatewayHost);
+    args.push('-e', `NO_PROXY=${merged}`);
+    args.push('-e', `no_proxy=${merged}`);
   }
 
   // Egress lockdown when enabled — throws if it can't be established, aborting
