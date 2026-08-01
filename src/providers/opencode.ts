@@ -37,28 +37,42 @@ registerProviderContainerConfig('opencode', (ctx) => {
     NO_PROXY: mergeNoProxy(ctx.hostEnv.NO_PROXY, '127.0.0.1,localhost'),
     no_proxy: mergeNoProxy(ctx.hostEnv.no_proxy, '127.0.0.1,localhost'),
   };
-  for (const key of ['OPENCODE_PROVIDER', 'OPENCODE_MODEL', 'OPENCODE_SMALL_MODEL'] as const) {
-    const value = ctx.hostEnv[key];
-    if (value) env[key] = value;
-  }
+  if (ctx.hostEnv.OPENCODE_SMALL_MODEL) env.OPENCODE_SMALL_MODEL = ctx.hostEnv.OPENCODE_SMALL_MODEL;
 
-  // Local-model providers (e.g. ollama): the agent-runner reads the provider
-  // baseURL from ANTHROPIC_BASE_URL, and the call must bypass the OneCLI HTTPS
-  // proxy (which only fronts external APIs). Point ANTHROPIC_BASE_URL at the
-  // configured local endpoint and add its host to NO_PROXY so it's reached
-  // directly on the egress network. Set OPENCODE_BASE_URL to enable.
-  const provider = ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
-  const localBaseUrl = ctx.hostEnv.OPENCODE_BASE_URL;
-  if (provider !== 'anthropic' && localBaseUrl) {
-    env.ANTHROPIC_BASE_URL = localBaseUrl;
-    let host = localBaseUrl;
-    try {
-      host = new URL(localBaseUrl).hostname;
-    } catch {
-      /* leave as-is if not a full URL */
+  // Model selection is PER-AGENT: the group's `model` (e.g.
+  // `openrouter/z-ai/glm-5.2`, `openrouter/deepseek/deepseek-v4-pro`,
+  // `ollama/qwen3:14b`) wins; the global OPENCODE_* env is only a fallback for
+  // agents with no explicit model. The provider is the model's first segment,
+  // and its endpoint is looked up below.
+  const model = ctx.model || ctx.hostEnv.OPENCODE_MODEL;
+  const KNOWN_ENDPOINTS: Record<string, string> = {
+    ollama: 'http://ollama-span-proxy:11434/v1', // local, on the egress net
+    openrouter: 'https://openrouter.ai/api/v1', // external, via OneCLI
+  };
+  if (model) {
+    const provider = model.includes('/') ? model.split('/')[0] : ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
+    env.OPENCODE_PROVIDER = provider;
+    env.OPENCODE_MODEL = model;
+    if (provider !== 'anthropic') {
+      const baseUrl = KNOWN_ENDPOINTS[provider] || ctx.hostEnv.OPENCODE_BASE_URL;
+      if (baseUrl) {
+        // The agent-runner reads the provider baseURL from ANTHROPIC_BASE_URL.
+        env.ANTHROPIC_BASE_URL = baseUrl;
+        // LOCAL (http://) endpoints bypass the OneCLI proxy to reach the egress
+        // net directly; EXTERNAL (https://) ones go THROUGH it so OneCLI injects
+        // the API key and handles egress.
+        if (baseUrl.startsWith('http://')) {
+          let host = baseUrl;
+          try {
+            host = new URL(baseUrl).hostname;
+          } catch {
+            /* leave as-is if not a full URL */
+          }
+          env.NO_PROXY = mergeNoProxy(env.NO_PROXY, host);
+          env.no_proxy = mergeNoProxy(env.no_proxy, host);
+        }
+      }
     }
-    env.NO_PROXY = mergeNoProxy(env.NO_PROXY, host);
-    env.no_proxy = mergeNoProxy(env.no_proxy, host);
   }
 
   return {

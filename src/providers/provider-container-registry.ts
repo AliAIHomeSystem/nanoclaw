@@ -42,6 +42,12 @@ export interface ProviderContainerContext {
   selectedSkills: string[];
   /** `process.env` at spawn time — pull passthrough values from here. */
   hostEnv: NodeJS.ProcessEnv;
+  /**
+   * Per-agent model override (`container_configs.model`), e.g.
+   * `openrouter/z-ai/glm-5.2` or `ollama/qwen3:14b`. Lets a provider pick the
+   * model/endpoint per agent instead of a single global env value.
+   */
+  model?: string;
 }
 
 export interface ProviderContainerContribution {
