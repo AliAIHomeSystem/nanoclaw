@@ -42,6 +42,25 @@ registerProviderContainerConfig('opencode', (ctx) => {
     if (value) env[key] = value;
   }
 
+  // Local-model providers (e.g. ollama): the agent-runner reads the provider
+  // baseURL from ANTHROPIC_BASE_URL, and the call must bypass the OneCLI HTTPS
+  // proxy (which only fronts external APIs). Point ANTHROPIC_BASE_URL at the
+  // configured local endpoint and add its host to NO_PROXY so it's reached
+  // directly on the egress network. Set OPENCODE_BASE_URL to enable.
+  const provider = ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
+  const localBaseUrl = ctx.hostEnv.OPENCODE_BASE_URL;
+  if (provider !== 'anthropic' && localBaseUrl) {
+    env.ANTHROPIC_BASE_URL = localBaseUrl;
+    let host = localBaseUrl;
+    try {
+      host = new URL(localBaseUrl).hostname;
+    } catch {
+      /* leave as-is if not a full URL */
+    }
+    env.NO_PROXY = mergeNoProxy(env.NO_PROXY, host);
+    env.no_proxy = mergeNoProxy(env.no_proxy, host);
+  }
+
   return {
     mounts: [{ hostPath: opencodeDir, containerPath: '/opencode-xdg', readonly: false }],
     env,
