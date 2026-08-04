@@ -14,6 +14,26 @@ function log(msg: string): void {
 
 const SESSION_STATUS_RETRY_ERROR_AFTER = 3;
 
+/**
+ * Transient upstream failures worth retrying rather than surfacing as the turn's
+ * answer. Aggregators report an upstream stall as an in-stream error with HTTP
+ * 200, so these never appear as a 5xx anywhere local — the only evidence is this
+ * message. Deliberately narrow: a genuine model refusal or a bad request must
+ * still fail fast rather than be retried three times.
+ *
+ * The status codes are \b-anchored because the haystack is often
+ * `JSON.stringify(error)` — an unanchored `502` also matches a token count of
+ * 1502 or a trace id ending in 504, which would retry a hard failure twice.
+ */
+const TRANSIENT_UPSTREAM_RE =
+  /upstream idle timeout|upstream error|\b(?:502|503|504)\b|overloaded|temporarily unavailable|timeout|ECONNRESET|socket hang up/i;
+const MAX_UPSTREAM_RETRIES = 2;
+
+/** Exported for test: pins which session errors are retried in place. */
+export function isTransientUpstreamError(message: string): boolean {
+  return TRANSIENT_UPSTREAM_RE.test(message);
+}
+
 /** Stale / dead OpenCode session heuristics (complement Claude-centric host patterns). */
 const STALE_SESSION_RE =
   /no conversation found|ENOENT.*\.jsonl|session.*not found|NotFoundError|connection reset|ECONNRESET|404|event timeout/i;
@@ -303,6 +323,7 @@ export class OpenCodeProvider implements AgentProvider {
         const partTextByMessageId = new Map<string, string>();
         const roleByMessageId = new Map<string, string>();
         let lastEventAt = Date.now();
+        let upstreamRetries = 0;
         let eventTimedOut = false;
         const timeoutCheck = setInterval(() => {
           if (Date.now() - lastEventAt > IDLE_TIMEOUT_MS) {
@@ -418,8 +439,39 @@ export class OpenCodeProvider implements AgentProvider {
               case 'session.error': {
                 const props = ev.properties as { sessionID?: string; error?: unknown };
                 if (props.sessionID === sessionId || props.sessionID === undefined) {
+                  const msg = sessionErrorMessage(props);
+                  // Transient upstream failures are common on aggregators: the
+                  // gateway returns HTTP 200 and reports the stall as an error
+                  // event INSIDE the stream, so nothing local times out and no
+                  // proxy log shows a 5xx. Previously any session.error ended the
+                  // turn, and the raw error object was delivered to the user as
+                  // the agent's answer — observed as
+                  // "Error: {code:504, Upstream idle timeout exceeded}" after a
+                  // successful render, losing the work that had already been done.
+                  // Retry in place: the session still holds the conversation, so
+                  // re-prompting resumes rather than restarting.
+                  if (isTransientUpstreamError(msg) && upstreamRetries < MAX_UPSTREAM_RETRIES) {
+                    upstreamRetries += 1;
+                    const backoffMs = 2000 * upstreamRetries;
+                    log(
+                      `Transient upstream error (attempt ${upstreamRetries}/${MAX_UPSTREAM_RETRIES}), ` +
+                        `retrying in ${backoffMs}ms: ${msg.slice(0, 160)}`,
+                    );
+                    yield { type: 'progress', message: `upstream stalled — retrying (${upstreamRetries})` };
+                    await new Promise((r) => setTimeout(r, backoffMs));
+                    const retryRes = await client.session.promptAsync({
+                      path: { id: sessionId },
+                      body: { parts: [{ type: 'text', text }] },
+                    });
+                    if (retryRes.error) {
+                      self.activeSessionId = undefined;
+                      throw new Error(`OpenCode promptAsync (retry): ${JSON.stringify(retryRes.error)}`);
+                    }
+                    lastEventAt = Date.now();
+                    break;
+                  }
                   self.activeSessionId = undefined;
-                  throw new Error(sessionErrorMessage(props));
+                  throw new Error(msg);
                 }
                 break;
               }
