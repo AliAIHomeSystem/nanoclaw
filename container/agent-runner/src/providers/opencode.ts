@@ -6,6 +6,7 @@ import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
+import { recordUsage } from '../db/connection.js';
 
 function log(msg: string): void {
   console.error(`[opencode-provider] ${msg}`);
@@ -332,9 +333,46 @@ export class OpenCodeProvider implements AgentProvider {
 
             switch (ev.type) {
               case 'message.updated': {
-                const info = ev.properties.info as { id?: string; role?: string } | undefined;
+                const info = ev.properties.info as
+                  | {
+                      id?: string;
+                      role?: string;
+                      modelID?: string;
+                      providerID?: string;
+                      cost?: number;
+                      tokens?: {
+                        input?: number;
+                        output?: number;
+                        reasoning?: number;
+                        cache?: { read?: number; write?: number };
+                      };
+                    }
+                  | undefined;
                 if (info?.id && info?.role) {
                   roleByMessageId.set(info.id, info.role);
+                }
+                // Assistant messages carry exact token counts and cost. Record
+                // them: this is the only place the platform can see real spend
+                // per agent — the credential proxy in front of the provider logs
+                // request metadata but never parses response bodies, so without
+                // this there is no cost attribution at all. Best-effort by
+                // design; accounting must never break a reply.
+                if (info?.id && info.role === 'assistant' && info.tokens) {
+                  try {
+                    const cache = (info.tokens.cache?.read ?? 0) + (info.tokens.cache?.write ?? 0);
+                    recordUsage({
+                      messageId: info.id,
+                      model: info.providerID ? `${info.providerID}/${info.modelID ?? ''}` : info.modelID,
+                      tokensIn: info.tokens.input,
+                      // Reasoning tokens are billed as output; folding them in
+                      // keeps this comparable to the provider's own invoice.
+                      tokensOut: (info.tokens.output ?? 0) + (info.tokens.reasoning ?? 0),
+                      tokensCache: cache,
+                      cost: info.cost,
+                    });
+                  } catch (err) {
+                    log(`usage record failed (ignored): ${err instanceof Error ? err.message : String(err)}`);
+                  }
                 }
                 break;
               }

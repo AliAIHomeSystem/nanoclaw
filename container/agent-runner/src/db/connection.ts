@@ -112,8 +112,65 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // usage_log: token counts and cost per assistant message, as reported by the
+    // provider. Deliberately NOT a messages_out row — this is telemetry, not a
+    // message, and routing it through the delivery path would put accounting
+    // data in the same queue as things people read.
+    //
+    // Why it exists: the platform's per-call token/cost telemetry came from a
+    // shim in front of Ollama. Moving to OpenRouter routed model calls through
+    // the OneCLI gateway instead, which logs request metadata but cannot see
+    // token counts (it does not parse response bodies) — so cost visibility went
+    // dark silently. The provider hands us exact numbers per message; this is
+    // where they land. An out-of-band collector reads it into the spans table.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS usage_log (
+        id           TEXT PRIMARY KEY,
+        timestamp    TEXT NOT NULL,
+        message_id   TEXT,
+        model        TEXT,
+        tokens_in    INTEGER,
+        tokens_out   INTEGER,
+        tokens_cache INTEGER,
+        cost         REAL,
+        exported_at  TEXT
+      );
+    `);
   }
   return _outbound;
+}
+
+/**
+ * Record what one assistant message cost. Called per `message.updated` carrying
+ * usage; providers re-emit an evolving message, so this UPSERTs on message_id —
+ * the final figures win rather than accumulating duplicates for one reply.
+ */
+export function recordUsage(u: {
+  messageId: string;
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokensCache?: number;
+  cost?: number;
+}): void {
+  const db = getOutboundDb();
+  db.prepare(
+    `INSERT INTO usage_log (id, timestamp, message_id, model, tokens_in, tokens_out, tokens_cache, cost)
+     VALUES ($id, $ts, $mid, $model, $tin, $tout, $tcache, $cost)
+     ON CONFLICT(id) DO UPDATE SET
+       timestamp = $ts, model = $model, tokens_in = $tin,
+       tokens_out = $tout, tokens_cache = $tcache, cost = $cost`,
+  ).run({
+    // Keyed by message id so re-emissions update in place.
+    $id: `usage-${u.messageId}`,
+    $ts: new Date().toISOString(),
+    $mid: u.messageId,
+    $model: u.model ?? null,
+    $tin: u.tokensIn ?? null,
+    $tout: u.tokensOut ?? null,
+    $tcache: u.tokensCache ?? null,
+    $cost: u.cost ?? null,
+  });
 }
 
 /**
