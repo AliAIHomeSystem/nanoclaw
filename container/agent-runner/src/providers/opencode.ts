@@ -160,6 +160,10 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
 
 type SharedRuntime = {
   proc: ChildProcess;
+  /** Base URL of the opencode server. The v1 client this provider uses has no
+   *  question.* methods (they exist only on the v2 client), so the question
+   *  endpoints are reached by raw fetch against this. */
+  baseUrl: string;
   client: OpencodeClient;
   stream: AsyncGenerator<{ type: string; properties: Record<string, unknown> }, void, void>;
   streamRelease: () => void;
@@ -195,6 +199,7 @@ async function ensureSharedRuntime(options: ProviderOptions): Promise<SharedRunt
     const stream = sub.stream as AsyncGenerator<{ type: string; properties: Record<string, unknown> }, void, void>;
     sharedRuntime = {
       proc,
+      baseUrl: url,
       client,
       stream,
       streamRelease: () => {
@@ -280,7 +285,7 @@ export class OpenCodeProvider implements AgentProvider {
     async function* gen(): AsyncGenerator<ProviderEvent> {
       let initYielded = false;
       const rt = await ensureSharedRuntime(self.options);
-      const { client, stream } = rt;
+      const { client, stream, baseUrl } = rt;
 
       while (!aborted) {
         while (pending.length === 0 && !ended && !aborted) {
@@ -324,6 +329,8 @@ export class OpenCodeProvider implements AgentProvider {
         const roleByMessageId = new Map<string, string>();
         let lastEventAt = Date.now();
         let upstreamRetries = 0;
+        // Set when the model tries to ask an interactive question (see below).
+        let questionText = '';
         let eventTimedOut = false;
         const timeoutCheck = setInterval(() => {
           if (Date.now() - lastEventAt > IDLE_TIMEOUT_MS) {
@@ -475,6 +482,51 @@ export class OpenCodeProvider implements AgentProvider {
                 }
                 break;
               }
+              // OpenCode has an INTERACTIVE question mechanism built for its TUI: the
+              // model calls it, the server publishes question.asked, and the model
+              // blocks until something replies to /question/<id>/reply or /reject.
+              //
+              // Nothing here can reply. There is no human attached to this runtime —
+              // the user is on Telegram, on the far side of two SQLite databases and a
+              // poll loop. Unhandled, the failure is total and silent: the model waits,
+              // the 5-minute idle timeout fires, the session is cleared and retried,
+              // the retry blocks the same way, and the container spins in that loop
+              // until it is killed. No output, no error, no timeout ever reaching the
+              // user. Observed exactly once in the wild, on a persona whose own hard
+              // rules tell it to "ask a single batch of clarifying questions".
+              //
+              // So: capture the questions as text, reject the request to unblock the
+              // model, and let the questions be the turn's answer if it produces
+              // nothing else. The user reads them in chat and replies normally — the
+              // next message carries the answers. An interactive prompt becomes a
+              // conversation, which is the only shape this transport has.
+              case 'question.asked': {
+                const q = ev.properties as {
+                  id?: string;
+                  questions?: Array<{ question?: string; options?: Array<{ label?: string; value?: string }> }>;
+                };
+                if (!q.id) break;
+                const asked = (q.questions ?? []).map((qq, i) => {
+                  const opts = (qq.options ?? [])
+                    .map((o) => o.label ?? o.value)
+                    .filter((o): o is string => Boolean(o));
+                  return `${i + 1}. ${qq.question ?? ''}${opts.length ? `\n   (${opts.join(' / ')})` : ''}`;
+                });
+                if (asked.length) {
+                  questionText = asked.join('\n');
+                  log(`Interactive question intercepted (${asked.length}) — rejecting and surfacing to the user`);
+                }
+                try {
+                  await fetch(`${baseUrl}/question/${encodeURIComponent(q.id)}/reject`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: '{}',
+                  });
+                } catch (err) {
+                  log(`Failed to reject question: ${err instanceof Error ? err.message : String(err)}`);
+                }
+                break;
+              }
               case 'session.idle': {
                 const sid = (ev.properties as { sessionID?: string }).sessionID;
                 if (sid === sessionId) {
@@ -496,7 +548,9 @@ export class OpenCodeProvider implements AgentProvider {
             resultText = partTextByMessageId.get(msgId) ?? resultText;
           }
         }
-        yield { type: 'result', text: resultText || null };
+        // Questions are the fallback, not an override: if the model went on to say
+        // something after being unblocked, that answer is the better reply.
+        yield { type: 'result', text: resultText || questionText || null };
       }
     }
 
