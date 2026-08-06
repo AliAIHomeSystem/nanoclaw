@@ -117,6 +117,17 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     .filter(Boolean)
     .filter((mid, i, a) => a.indexOf(mid as string) === i);
 
+  // Cost metadata ($ per MILLION tokens) for models OpenCode's bundled models.dev
+  // catalog does not know. A model we declare here merges with the catalog entry
+  // when one exists (kimi-k2.5 gets priced that way); when none exists, a
+  // declaration without `cost` makes OpenCode report cost 0 for every call —
+  // which silently blanks per-step cost reporting and the telemetry spend column.
+  // That is exactly what happened with deepseek-v4-pro. Prices from
+  // https://openrouter.ai/api/v1/models, checked 2026-08-06.
+  const MODEL_COSTS: Record<string, { input: number; output: number; cache_read?: number }> = {
+    'deepseek/deepseek-v4-pro': { input: 0.435, output: 0.87, cache_read: 0.003625 },
+  };
+
   const providerOptions: Record<string, unknown> =
     provider === 'anthropic'
       ? {}
@@ -126,7 +137,15 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
             ...(modelsToRegister.length > 0
               ? {
                   models: Object.fromEntries(
-                    modelsToRegister.map((mid) => [mid, { id: mid, name: mid, tool_call: true }]),
+                    modelsToRegister.map((mid) => [
+                      mid,
+                      {
+                        id: mid,
+                        name: mid,
+                        tool_call: true,
+                        ...(MODEL_COSTS[mid as string] ? { cost: MODEL_COSTS[mid as string] } : {}),
+                      },
+                    ]),
                   ),
                 }
               : {}),
