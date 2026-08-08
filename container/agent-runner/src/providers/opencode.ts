@@ -126,14 +126,31 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
   // https://openrouter.ai/api/v1/models, checked 2026-08-06.
   const MODEL_COSTS: Record<string, { input: number; output: number; cache_read?: number }> = {
     'deepseek/deepseek-v4-pro': { input: 0.435, output: 0.87, cache_read: 0.003625 },
+    // Priced at the deepseek/fp8 endpoint we pin to via OPENCODE_UPSTREAM_ORDER,
+    // not OpenRouter's headline (cheapest-endpoint) rate.
+    'deepseek/deepseek-v4-flash-0731': { input: 0.14, output: 0.28, cache_read: 0.0028 },
   };
+
+  // Upstream routing pin, host-set only for verified openrouter models
+  // (src/providers/opencode.ts). extraBody merges into every request body
+  // (@openrouter/ai-sdk-provider settings.extraBody). No allow_fallbacks:false —
+  // an upstream outage should degrade to a cache miss on another host, not a
+  // failed call.
+  const upstreamOrder = (process.env.OPENCODE_UPSTREAM_ORDER || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const providerOptions: Record<string, unknown> =
     provider === 'anthropic'
       ? {}
       : {
           [provider]: {
-            options: { apiKey: 'placeholder', baseURL: proxyUrl },
+            options: {
+              apiKey: 'placeholder',
+              baseURL: proxyUrl,
+              ...(upstreamOrder.length > 0 ? { extraBody: { provider: { order: upstreamOrder } } } : {}),
+            },
             ...(modelsToRegister.length > 0
               ? {
                   models: Object.fromEntries(

@@ -49,10 +49,24 @@ registerProviderContainerConfig('opencode', (ctx) => {
     ollama: 'http://ollama-span-proxy:11434/v1', // local, on the egress net
     openrouter: 'https://openrouter.ai/api/v1', // external, via OneCLI
   };
+  // OpenRouter load-balances each model across many upstream hosts, and prompt
+  // caches live on the individual host — every reroute reprocesses the whole
+  // context at full input price (measured 2026-08-08: 90%+ of all fresh input
+  // tokens were on reroute cache misses). Pin routing for models where the slug
+  // is verified to serve the model AND has the best cache-read price; leave the
+  // rest on default routing rather than guess — a slug that doesn't serve the
+  // model would silently change nothing, and the author slug often doesn't
+  // (z-ai does not serve glm-5.2). Slugs per
+  // https://openrouter.ai/api/v1/models/<model>/endpoints.
+  const UPSTREAM_ORDER: Record<string, string> = {
+    'openrouter/deepseek/deepseek-v4-pro': 'deepseek',
+    'openrouter/deepseek/deepseek-v4-flash-0731': 'deepseek',
+  };
   if (model) {
     const provider = model.includes('/') ? model.split('/')[0] : ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
     env.OPENCODE_PROVIDER = provider;
     env.OPENCODE_MODEL = model;
+    if (UPSTREAM_ORDER[model]) env.OPENCODE_UPSTREAM_ORDER = UPSTREAM_ORDER[model];
     if (provider !== 'anthropic') {
       const baseUrl = KNOWN_ENDPOINTS[provider] || ctx.hostEnv.OPENCODE_BASE_URL;
       if (baseUrl) {
