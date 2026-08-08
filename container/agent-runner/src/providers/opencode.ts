@@ -124,11 +124,18 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
   // which silently blanks per-step cost reporting and the telemetry spend column.
   // That is exactly what happened with deepseek-v4-pro. Prices from
   // https://openrouter.ai/api/v1/models, checked 2026-08-06.
+  // All entries priced at the endpoint OPENCODE_UPSTREAM_ORDER pins the model
+  // to (src/providers/opencode.ts on the host), not OpenRouter's headline
+  // cheapest-endpoint rate — pinned-endpoint rates are what actually bills.
+  // glm-5.2 was the second catalog-unknown model found reporting cost 0.
   const MODEL_COSTS: Record<string, { input: number; output: number; cache_read?: number }> = {
     'deepseek/deepseek-v4-pro': { input: 0.435, output: 0.87, cache_read: 0.003625 },
-    // Priced at the deepseek/fp8 endpoint we pin to via OPENCODE_UPSTREAM_ORDER,
-    // not OpenRouter's headline (cheapest-endpoint) rate.
     'deepseek/deepseek-v4-flash-0731': { input: 0.14, output: 0.28, cache_read: 0.0028 },
+    'z-ai/glm-5.2': { input: 0.406, output: 1.276, cache_read: 0.0754 },
+    'moonshotai/kimi-k3': { input: 2.85, output: 14.25, cache_read: 0.285 },
+    'moonshotai/kimi-k2.5': { input: 0.54, output: 2.7, cache_read: 0.09 },
+    'minimax/minimax-m3': { input: 0.24, output: 0.96, cache_read: 0.048 },
+    'tencent/hy3': { input: 0.132, output: 0.528, cache_read: 0.033 },
   };
 
   // Upstream routing pin, host-set only for verified openrouter models

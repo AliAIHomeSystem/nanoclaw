@@ -58,9 +58,18 @@ registerProviderContainerConfig('opencode', (ctx) => {
   // model would silently change nothing, and the author slug often doesn't
   // (z-ai does not serve glm-5.2). Slugs per
   // https://openrouter.ai/api/v1/models/<model>/endpoints.
+  // Chosen per model from the endpoints listing (cache-read price x uptime x
+  // quantization), 2026-08-08. A bare slug cannot disambiguate a provider's
+  // variants, so only single-variant providers are pinned (kimi-k3 avoids
+  // `morph`, whose second variant `morph/fast` is 2.4x the price at 0% uptime).
   const UPSTREAM_ORDER: Record<string, string> = {
     'openrouter/deepseek/deepseek-v4-pro': 'deepseek',
     'openrouter/deepseek/deepseek-v4-flash-0731': 'deepseek',
+    'openrouter/z-ai/glm-5.2': 'baidu', // fp8, 100% up, cheaper than headline (0.41 vs 0.72)
+    'openrouter/moonshotai/kimi-k3': 'digitalocean', // single-variant; morph is ambiguous
+    'openrouter/moonshotai/kimi-k2.5': 'streamlake', // only fp8 endpoint at the cheap tier (rest are int4/fp4)
+    'openrouter/minimax/minimax-m3': 'gmicloud', // fp8, 1M ctx, cheapest prompt AND cache
+    'openrouter/tencent/hy3': 'tencent', // the author, fp8, 99.9% up, price parity
   };
   if (model) {
     const provider = model.includes('/') ? model.split('/')[0] : ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
