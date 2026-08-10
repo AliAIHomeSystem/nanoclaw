@@ -137,6 +137,7 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
     'minimax/minimax-m3': { input: 0.24, output: 0.96, cache_read: 0.048 },
     'tencent/hy3': { input: 0.132, output: 0.528, cache_read: 0.033 },
     'anthropic/claude-sonnet-5': { input: 2.0, output: 10.0, cache_read: 0.2 },
+    'openai/gpt-5.6-sol': { input: 5.0, output: 30.0, cache_read: 0.5 },
   };
 
   // Upstream routing pin, host-set only for verified openrouter models
