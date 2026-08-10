@@ -70,6 +70,7 @@ registerProviderContainerConfig('opencode', (ctx) => {
     'openrouter/moonshotai/kimi-k2.5': 'streamlake', // only fp8 endpoint at the cheap tier (rest are int4/fp4)
     'openrouter/minimax/minimax-m3': 'gmicloud', // fp8, 1M ctx, cheapest prompt AND cache
     'openrouter/tencent/hy3': 'tencent', // the author, fp8, 99.9% up, price parity
+    'openrouter/anthropic/claude-sonnet-5': 'anthropic', // the author, single-variant, price parity
   };
   if (model) {
     const provider = model.includes('/') ? model.split('/')[0] : ctx.hostEnv.OPENCODE_PROVIDER || 'anthropic';
