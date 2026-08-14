@@ -130,6 +130,7 @@ function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> 
   // glm-5.2 was the second catalog-unknown model found reporting cost 0.
   const MODEL_COSTS: Record<string, { input: number; output: number; cache_read?: number }> = {
     'deepseek/deepseek-v4-pro': { input: 0.435, output: 0.87, cache_read: 0.003625 },
+    'deepseek/deepseek-v4-pro-0813': { input: 0.435, output: 0.87, cache_read: 0.003625 },
     'deepseek/deepseek-v4-flash-0731': { input: 0.14, output: 0.28, cache_read: 0.0028 },
     'z-ai/glm-5.2': { input: 0.406, output: 1.276, cache_read: 0.0754 },
     'moonshotai/kimi-k3': { input: 2.85, output: 14.25, cache_read: 0.285 },

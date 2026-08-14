@@ -64,6 +64,7 @@ registerProviderContainerConfig('opencode', (ctx) => {
   // `morph`, whose second variant `morph/fast` is 2.4x the price at 0% uptime).
   const UPSTREAM_ORDER: Record<string, string> = {
     'openrouter/deepseek/deepseek-v4-pro': 'deepseek',
+    'openrouter/deepseek/deepseek-v4-pro-0813': 'deepseek', // dated pin of the same snapshot the floating tag is cutting over to
     'openrouter/deepseek/deepseek-v4-flash-0731': 'deepseek',
     'openrouter/z-ai/glm-5.2': 'baidu', // fp8, 100% up, cheaper than headline (0.41 vs 0.72)
     'openrouter/moonshotai/kimi-k3': 'digitalocean', // single-variant; morph is ambiguous
